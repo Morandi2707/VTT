@@ -7,7 +7,6 @@ export interface CampaignSummary {
   name: string
   systemId: string
   role: 'gm' | 'player'
-  inviteCode: string | null // só o GM enxerga o código
   gmId: string
 }
 
@@ -17,16 +16,22 @@ interface MembershipRow {
     id: string
     name: string
     system_id: string
-    invite_code: string | null
     gm_id: string
   } | null
 }
 
 export async function listMyCampaigns(): Promise<CampaignSummary[]> {
   if (!supabase) return []
+  const { data: userData } = await supabase.auth.getUser()
+  const userId = userData.user?.id
+  if (!userId) return []
+  // Filtra APENAS as MINHAS participações — a RLS deixa membros verem as linhas
+  // uns dos outros (necessário pra lista de jogadores), então sem este filtro
+  // a mesa apareceria duplicada com o papel de outra pessoa.
   const { data, error } = await supabase
     .from('campaign_members')
-    .select('role, campaigns(id, name, system_id, invite_code, gm_id)')
+    .select('role, campaigns(id, name, system_id, gm_id)')
+    .eq('user_id', userId)
     .order('created_at', { ascending: false })
   if (error) throw new Error(error.message)
   return ((data ?? []) as unknown as MembershipRow[])
@@ -36,9 +41,16 @@ export async function listMyCampaigns(): Promise<CampaignSummary[]> {
       name: row.campaigns!.name,
       systemId: row.campaigns!.system_id,
       role: row.role,
-      inviteCode: row.campaigns!.invite_code,
       gmId: row.campaigns!.gm_id,
     }))
+}
+
+/** Código de convite — o banco só entrega para o GM (RPC com verificação). */
+export async function getInviteCode(campaignId: string): Promise<string> {
+  if (!supabase) throw new Error('Supabase não configurado')
+  const { data, error } = await supabase.rpc('get_invite_code', { p_campaign_id: campaignId })
+  if (error) throw new Error(error.message)
+  return data as string
 }
 
 export async function createCampaign(name: string): Promise<string> {
@@ -70,13 +82,13 @@ export async function deleteCampaign(id: string): Promise<void> {
 
 export async function getCampaign(
   id: string,
-): Promise<{ id: string; name: string; inviteCode: string | null; gmId: string } | null> {
+): Promise<{ id: string; name: string; gmId: string } | null> {
   if (!supabase) return null
   const { data, error } = await supabase
     .from('campaigns')
-    .select('id, name, invite_code, gm_id')
+    .select('id, name, gm_id')
     .eq('id', id)
     .maybeSingle()
   if (error) throw new Error(error.message)
-  return data ? { id: data.id, name: data.name, inviteCode: data.invite_code, gmId: data.gm_id } : null
+  return data ? { id: data.id, name: data.name, gmId: data.gm_id } : null
 }

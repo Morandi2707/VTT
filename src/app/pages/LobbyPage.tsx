@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/app/authStore'
 import {
   createCampaign,
+  getInviteCode,
   joinCampaignByCode,
   listMyCampaigns,
   type CampaignSummary,
@@ -11,7 +12,21 @@ import {
 // Lobby: as mesas do usuário, criação de mesa nova e entrada por convite.
 
 function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
-  const [copied, setCopied] = useState(false)
+  const [inviteState, setInviteState] = useState<'idle' | 'loading' | 'copied' | 'error'>('idle')
+
+  // O código NUNCA vem na listagem — só o GM consegue buscá-lo, na hora do clique.
+  async function copyInvite() {
+    setInviteState('loading')
+    try {
+      const code = await getInviteCode(campaign.id)
+      await navigator.clipboard.writeText(code)
+      setInviteState('copied')
+    } catch {
+      setInviteState('error')
+    } finally {
+      setTimeout(() => setInviteState('idle'), 2000)
+    }
+  }
 
   return (
     <div className="flex flex-col justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 transition-colors hover:border-zinc-700">
@@ -38,19 +53,21 @@ function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
         >
           Entrar na mesa
         </Link>
-        {campaign.role === 'gm' && campaign.inviteCode && (
+        {campaign.role === 'gm' && (
           <button
             type="button"
             title="Copiar código de convite para os jogadores"
-            onClick={() => {
-              void navigator.clipboard.writeText(campaign.inviteCode ?? '').then(() => {
-                setCopied(true)
-                setTimeout(() => setCopied(false), 2000)
-              })
-            }}
-            className="rounded-lg bg-zinc-800 px-3 py-1.5 font-mono text-xs font-semibold text-zinc-300 transition-colors hover:bg-zinc-700"
+            onClick={() => void copyInvite()}
+            disabled={inviteState === 'loading'}
+            className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-300 transition-colors hover:bg-zinc-700 disabled:opacity-50"
           >
-            {copied ? 'Copiado!' : campaign.inviteCode}
+            {inviteState === 'copied'
+              ? 'Copiado!'
+              : inviteState === 'error'
+                ? 'Erro'
+                : inviteState === 'loading'
+                  ? '…'
+                  : '🎟️ Convite'}
           </button>
         )}
       </div>
