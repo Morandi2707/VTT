@@ -16,6 +16,10 @@ interface AuthState {
   signIn(email: string, password: string): Promise<boolean>
   signUp(email: string, password: string, displayName: string): Promise<'ok' | 'confirm-email' | 'error'>
   signOut(): Promise<void>
+  /** Envia o e-mail com o link de redefinição de senha. */
+  resetPassword(email: string): Promise<boolean>
+  /** Define a nova senha (usuário chega logado pelo link de recuperação). */
+  updatePassword(password: string): Promise<boolean>
   updateDisplayName(name: string): Promise<void>
   clearError(): void
 }
@@ -82,6 +86,30 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signOut: async () => {
     await supabase?.auth.signOut()
+  },
+
+  resetPassword: async (email) => {
+    if (!supabase) return false
+    set({ error: null })
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/redefinir-senha`,
+    })
+    if (error) {
+      set({ error: translateAuthError(error.message) })
+      return false
+    }
+    return true
+  },
+
+  updatePassword: async (password) => {
+    if (!supabase) return false
+    set({ error: null })
+    const { error } = await supabase.auth.updateUser({ password })
+    if (error) {
+      set({ error: translateAuthError(error.message) })
+      return false
+    }
+    return true
   },
 
   updateDisplayName: async (name) => {

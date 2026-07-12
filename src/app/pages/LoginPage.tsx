@@ -4,13 +4,14 @@ import { useAuthStore } from '@/app/authStore'
 
 // Porta de entrada da plataforma. Login e cadastro com e-mail/senha.
 
-type Mode = 'signin' | 'signup'
+type Mode = 'signin' | 'signup' | 'forgot'
 
 export function LoginPage() {
   const status = useAuthStore((s) => s.status)
   const error = useAuthStore((s) => s.error)
   const signIn = useAuthStore((s) => s.signIn)
   const signUp = useAuthStore((s) => s.signUp)
+  const resetPassword = useAuthStore((s) => s.resetPassword)
   const clearError = useAuthStore((s) => s.clearError)
 
   const [params] = useSearchParams()
@@ -34,6 +35,12 @@ export function LoginPage() {
     try {
       if (mode === 'signin') {
         await signIn(email, password)
+      } else if (mode === 'forgot') {
+        if (await resetPassword(email)) {
+          setNotice(
+            'Se este e-mail tiver cadastro, você vai receber um link para criar uma senha nova. Confira também o spam.',
+          )
+        }
       } else {
         const result = await signUp(email, password, displayName)
         if (result === 'confirm-email') {
@@ -119,17 +126,19 @@ export function LoginPage() {
               className={inputClass}
               aria-label="E-mail"
             />
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={mode === 'signup' ? 'Senha (mín. 6 caracteres)' : 'Senha'}
-              required
-              minLength={6}
-              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-              className={inputClass}
-              aria-label="Senha"
-            />
+            {mode !== 'forgot' && (
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={mode === 'signup' ? 'Senha (mín. 6 caracteres)' : 'Senha'}
+                required
+                minLength={6}
+                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                className={inputClass}
+                aria-label="Senha"
+              />
+            )}
 
             {error && <p className="text-xs text-red-400">{error}</p>}
             {notice && <p className="text-xs text-emerald-400">{notice}</p>}
@@ -139,8 +148,33 @@ export function LoginPage() {
               disabled={busy || status === 'loading'}
               className="mt-1 rounded-lg bg-cyan-700 py-2.5 text-sm font-bold text-white transition-colors hover:bg-cyan-600 disabled:opacity-50"
             >
-              {busy ? 'Um instante…' : mode === 'signin' ? 'Entrar na Ordem' : 'Criar minha conta'}
+              {busy
+                ? 'Um instante…'
+                : mode === 'signin'
+                  ? 'Entrar na Ordem'
+                  : mode === 'forgot'
+                    ? 'Enviar link de redefinição'
+                    : 'Criar minha conta'}
             </button>
+
+            {mode === 'signin' && (
+              <button
+                type="button"
+                onClick={() => switchMode('forgot')}
+                className="text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+              >
+                Esqueci minha senha
+              </button>
+            )}
+            {mode === 'forgot' && (
+              <button
+                type="button"
+                onClick={() => switchMode('signin')}
+                className="text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+              >
+                ← Voltar ao login
+              </button>
+            )}
           </form>
         </div>
 
