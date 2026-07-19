@@ -13,6 +13,7 @@ import {
   joinCampaignByCode,
 } from '@/data/campaigns'
 import { isSupabaseConfigured } from '@/data/supabase'
+import { uploadAsset } from '@/data/assets'
 import { loadLocalAsset, saveLocalAsset, deleteLocalAsset, sceneMapKey } from '@/data/localAssets'
 import { LoungeView } from '@/app/pages/LoungeView'
 import { BoardCanvas } from '@/ui/board/BoardCanvas'
@@ -294,6 +295,8 @@ function RoomView({
   const setMapUri = useBoardStore((s) => s.setMapUri)
   const [zoom, setZoom] = useState<number | null>(null)
   const [inviteState, setInviteState] = useState<'idle' | 'loading' | 'copied' | 'error'>('idle')
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [gmScreenOpen, setGmScreenOpen] = useState(false)
   const [endModalOpen, setEndModalOpen] = useState(false)
 
@@ -335,8 +338,10 @@ function RoomView({
     [peers],
   )
 
-  // Restaura o mapa salvo localmente (IndexedDB) para esta sala.
+  // Modo demo (sem Supabase): o mapa mora só neste navegador, via IndexedDB.
+  // Com Supabase, quem manda é a URL compartilhada no doc da sala.
   useEffect(() => {
+    if (isSupabaseConfigured) return
     let cancelled = false
     void loadLocalAsset(sceneMapKey(roomId)).then((blob) => {
       if (blob && !cancelled) setMapUri(URL.createObjectURL(blob))
@@ -384,12 +389,38 @@ function RoomView({
     [moveToken, selectToken, roomId],
   )
 
-  const handlePickMap = useCallback(
-    (file: File) => {
-      void saveLocalAsset(sceneMapKey(roomId), file)
-      setMapUri(URL.createObjectURL(file))
+  /**
+   * Sobe a imagem para o Storage e devolve a URL que todos conseguem carregar.
+   * Sem Supabase (modo demo) cai no blob local, que só vale neste navegador.
+   */
+  const publishImage = useCallback(
+    async (file: File): Promise<string | null> => {
+      if (!isSupabaseConfigured) return URL.createObjectURL(file)
+      setUploading(true)
+      setUploadError(null)
+      try {
+        return await uploadAsset(file, roomId)
+      } catch (err) {
+        setUploadError(
+          err instanceof Error ? err.message : 'Não foi possível enviar a imagem.',
+        )
+        return null
+      } finally {
+        setUploading(false)
+      }
     },
-    [roomId, setMapUri],
+    [roomId],
+  )
+
+  const handlePickMap = useCallback(
+    async (file: File) => {
+      const url = await publishImage(file)
+      if (!url) return
+      // Sem Supabase, guardamos localmente para o mapa sobreviver ao F5.
+      if (!isSupabaseConfigured) void saveLocalAsset(sceneMapKey(roomId), file)
+      setMapUri(url)
+    },
+    [roomId, setMapUri, publishImage],
   )
 
   const handleRemoveMap = useCallback(() => {
@@ -398,7 +429,9 @@ function RoomView({
   }, [roomId, setMapUri])
 
   const handlePickToken = useCallback(
-    (file: File) => {
+    async (file: File) => {
+      const url = await publishImage(file)
+      if (!url) return
       const grid = demoScene.grid
       const center = snapToCellCenter(demoScene.width / 2, demoScene.height / 2, {
         size: grid.size,
@@ -409,12 +442,12 @@ function RoomView({
         tokenSchema.parse({
           id: crypto.randomUUID(),
           name: fileBaseName(file),
-          imageUri: URL.createObjectURL(file),
+          imageUri: url,
           ...center,
         }),
       )
     },
-    [addToken],
+    [addToken, publishImage],
   )
 
   return (
@@ -430,6 +463,21 @@ function RoomView({
         />
 
         <SyncWarning />
+
+        {/* Envio de imagem em andamento / falhou */}
+        {(uploading || uploadError) && (
+          <div className="pointer-events-none absolute left-1/2 top-16 z-20 -translate-x-1/2">
+            {uploading ? (
+              <span className="rounded-full bg-zinc-900/90 px-4 py-1.5 text-xs font-semibold text-zinc-300 shadow backdrop-blur">
+                📤 Enviando imagem…
+              </span>
+            ) : (
+              <span className="pointer-events-auto rounded-full bg-red-950/90 px-4 py-1.5 text-xs font-semibold text-red-200 shadow backdrop-blur">
+                {uploadError}
+              </span>
+            )}
+          </div>
+        )}
 
         <PresenceBar peers={peers} onRename={setDisplayName} />
 
@@ -535,9 +583,13 @@ function RoomView({
           onChange={(e) => {
             const file = e.target.files?.[0]
             const tokenId = pendingTokenIdRef.current
-            if (file && tokenId) setTokenImage(tokenId, URL.createObjectURL(file))
             pendingTokenIdRef.current = null
             e.target.value = ''
+            if (file && tokenId) {
+              void publishImage(file).then((url) => {
+                if (url) setTokenImage(tokenId, url)
+              })
+            }
           }}
         />
       </div>

@@ -191,7 +191,13 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   closeSheet: () => set({ sheet: null }),
 
-  setMapUri: (uri) => set({ mapUri: uri }),
+  setMapUri: (uri) => {
+    set({ mapUri: uri })
+    // URLs compartilháveis (Supabase Storage) vão para o doc da sala, para que
+    // todos vejam o mesmo mapa. `blob:` é local do navegador — não propaga.
+    const shareable = uri === null || /^https?:/.test(uri)
+    if (shareable && yMeta) yMeta.set('mapUrl', uri ?? '')
+  },
 
   setDisplayName: (name) => {
     const trimmed = name.trim().slice(0, 24)
@@ -283,7 +289,14 @@ export function initRoomSession(roomId: string, opts: RoomSessionOptions = {}): 
   }
 
   const mirrorMeta = () => {
-    useBoardStore.setState({ phase: yMeta?.get('phase') === 'live' ? 'live' : 'prep' })
+    const patch: Partial<BoardState> = {
+      phase: yMeta?.get('phase') === 'live' ? 'live' : 'prep',
+    }
+    // A chave só existe quando alguém definiu/removeu o mapa pela nuvem; sem
+    // ela, preservamos o mapa local (modo demo, sem Supabase).
+    const sharedMap = yMeta?.get('mapUrl')
+    if (sharedMap !== undefined) patch.mapUri = sharedMap === '' ? null : sharedMap
+    useBoardStore.setState(patch)
   }
 
   const mirrorPresence = () => {
