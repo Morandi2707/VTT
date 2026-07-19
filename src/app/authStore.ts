@@ -30,7 +30,19 @@ function translateAuthError(message: string): string {
   if (m.includes('already registered')) return 'Este e-mail já tem cadastro — faça login.'
   if (m.includes('password should be at least')) return 'A senha precisa de pelo menos 6 caracteres.'
   if (m.includes('valid email')) return 'Digite um e-mail válido.'
-  if (m.includes('rate limit')) return 'Muitas tentativas — aguarde um instante.'
+  if (m.includes('email not confirmed')) {
+    return 'Falta confirmar seu e-mail. Procure a mensagem do Supabase na caixa de entrada e no spam.'
+  }
+  // O plano gratuito do Supabase envia poucos e-mails por hora, para o projeto
+  // inteiro — vale dizer isso, senão parece problema do navegador da pessoa.
+  if (m.includes('email rate limit') || m.includes('over_email_send_rate_limit')) {
+    return 'O limite de envio de e-mails do servidor foi atingido (é por hora e vale para todos). Espere um pouco e tente de novo, ou peça ao mestre para desativar a confirmação por e-mail.'
+  }
+  const espera = /after (\d+) seconds?/.exec(m)
+  if (espera) return `Aguarde ${espera[1]} segundos antes de tentar de novo.`
+  if (m.includes('rate limit') || m.includes('too many')) {
+    return 'Tentativas demais em pouco tempo. Espere cerca de um minuto e tente de novo.'
+  }
   return message
 }
 
