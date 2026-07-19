@@ -1,0 +1,41 @@
+# O plano gratuito do Supabase pausa projetos após ~7 dias sem atividade.
+# Este job faz uma consulta leve ao banco a cada 3 dias para mantê-lo acordado,
+# evitando que a mesa marcada pro sábado esbarre num banco hibernado.
+#
+# Sobre a chave abaixo: é a chave "anon", pública por design — ela já vai
+# embutida no JavaScript que todo visitante do site baixa. Quem protege os
+# dados é o RLS no banco, não o sigilo dela. (A chave "service_role", essa sim
+# secreta, nunca aparece no repositório.)
+
+name: Manter Supabase acordado
+
+on:
+  schedule:
+    - cron: '0 12 */3 * *' # a cada 3 dias, 12:00 UTC (09:00 em Brasília)
+  workflow_dispatch: # permite rodar na mão pelo botão "Run workflow"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar o banco
+        env:
+          SUPABASE_URL: https://zatbrhfuigvqdrktaunk.supabase.co
+          SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphdGJyaGZ1aWd2cWRya3RhdW5rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4NDU4MzQsImV4cCI6MjA5OTQyMTgzNH0.FcgT6ZQPytuVNvStFwls7QK9KU460AWLMhS-4zirrps
+        run: |
+          # Consulta real via PostgREST: chega até o Postgres (o RLS devolve
+          # lista vazia para anônimo, mas a query executa — e é isso que conta
+          # como atividade para o Supabase).
+          status=$(curl -sS -o /tmp/resposta.txt -w '%{http_code}' \
+            --retry 3 --retry-delay 30 --retry-all-errors --max-time 60 \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            "$SUPABASE_URL/rest/v1/profiles?select=id&limit=1")
+
+          echo "HTTP $status"
+          echo "Resposta: $(cat /tmp/resposta.txt)"
+
+          if [ "$status" != "200" ]; then
+            echo "::error::Banco não respondeu 200 (veio $status). O projeto pode estar pausado — verifique em https://supabase.com/dashboard"
+            exit 1
+          fi
+          echo "Banco acordado. ✅"
