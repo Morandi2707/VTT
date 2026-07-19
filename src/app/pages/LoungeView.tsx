@@ -8,6 +8,7 @@ import {
   type Actor,
 } from '@/core'
 import { currentUserId, useBoardStore } from '@/app/store'
+import { SyncWarning } from '@/ui/board/SyncWarning'
 import { ChatPanel } from '@/ui/chat/ChatPanel'
 import { OpSheetWindow } from '@/ui/sheets/ordem-paranormal/OpSheet'
 
@@ -44,6 +45,7 @@ export function LoungeView({ roomId, campaignName }: { roomId: string; campaignN
   const actors = useBoardStore((s) => s.actors)
   const peers = useBoardStore((s) => s.peers)
   const connection = useBoardStore((s) => s.connection)
+  const stalled = useBoardStore((s) => s.syncStalled)
   const createActor = useBoardStore((s) => s.createActor)
   const openSheet = useBoardStore((s) => s.openSheet)
   const importInputRef = useRef<HTMLInputElement>(null)
@@ -85,7 +87,8 @@ export function LoungeView({ roomId, campaignName }: { roomId: string; campaignN
   }
 
   return (
-    <main className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100">
+    <main className="relative flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100">
+      <SyncWarning />
       <div className="flex flex-1 flex-col overflow-y-auto">
         {/* topo */}
         <header className="border-b border-zinc-800/80 px-6 py-4">
@@ -97,7 +100,11 @@ export function LoungeView({ roomId, campaignName }: { roomId: string; campaignN
               <h1 className="text-lg font-bold">{campaignName}</h1>
               <p className="text-xs text-zinc-500">
                 Sala de espera ·{' '}
-                {connection === 'connected' ? (
+                {stalled ? (
+                  <span className="font-semibold text-red-400">
+                    sem conexão com o servidor da mesa
+                  </span>
+                ) : connection === 'connected' ? (
                   <span className="text-amber-400">aguardando o mestre iniciar a sessão…</span>
                 ) : (
                   'conectando…'

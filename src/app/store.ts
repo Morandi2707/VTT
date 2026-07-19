@@ -66,6 +66,8 @@ interface BoardState {
   isGm: boolean
   phase: RoomPhase
   connection: ConnectionStatus
+  /** Passou tempo demais sem conectar — a mesa não vai sincronizar. */
+  syncStalled: boolean
   tokens: Record<string, Token>
   actors: Record<string, Actor>
   /** Bestiário do escudo do mestre (só populado no cliente do GM). */
@@ -100,6 +102,7 @@ const EMPTY_ROOM_STATE = {
   isGm: false,
   phase: 'prep' as RoomPhase,
   connection: 'connecting' as ConnectionStatus,
+  syncStalled: false,
   tokens: {},
   actors: {},
   gmActors: {},
@@ -287,15 +290,30 @@ export function initRoomSession(roomId: string, opts: RoomSessionOptions = {}): 
     useBoardStore.setState({ peers: readPresence(awareness) })
   }
 
+  // Se em 12s não houve conexão, avisamos a UI — sem isso o jogador fica
+  // eternamente num "aguardando o mestre" que nunca vai chegar.
+  const STALL_MS = 12_000
+  let stallTimer: ReturnType<typeof setTimeout> | undefined
+  const armStallTimer = () => {
+    clearTimeout(stallTimer)
+    stallTimer = setTimeout(() => {
+      if (useBoardStore.getState().connection !== 'connected') {
+        useBoardStore.setState({ syncStalled: true })
+      }
+    }, STALL_MS)
+  }
+  armStallTimer()
+
   const onStatus = ({ status }: { status: string }) => {
-    useBoardStore.setState({
-      connection:
-        status === 'connected'
-          ? 'connected'
-          : status === 'connecting'
-            ? 'connecting'
-            : 'disconnected',
-    })
+    const connection: ConnectionStatus =
+      status === 'connected' ? 'connected' : status === 'connecting' ? 'connecting' : 'disconnected'
+    if (connection === 'connected') {
+      clearTimeout(stallTimer)
+      useBoardStore.setState({ connection, syncStalled: false })
+    } else {
+      armStallTimer()
+      useBoardStore.setState({ connection })
+    }
   }
 
   yTokens.observe(mirrorTokens)
@@ -353,6 +371,7 @@ export function initRoomSession(roomId: string, opts: RoomSessionOptions = {}): 
   }
 
   teardown = () => {
+    clearTimeout(stallTimer)
     yTokens?.unobserve(mirrorTokens)
     yActors?.unobserve(mirrorActors)
     yChat?.unobserve(mirrorChat)

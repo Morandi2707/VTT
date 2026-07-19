@@ -14,12 +14,14 @@ import {
 function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
   const [inviteState, setInviteState] = useState<'idle' | 'loading' | 'copied' | 'error'>('idle')
 
-  // O código NUNCA vem na listagem — só o GM consegue buscá-lo, na hora do clique.
+  // O código NUNCA vem na listagem — só o GM consegue buscá-lo, na hora do
+  // clique. Copiamos o LINK pronto: o jogador clica e já entra na mesa.
   async function copyInvite() {
     setInviteState('loading')
     try {
       const code = await getInviteCode(campaign.id)
-      await navigator.clipboard.writeText(code)
+      const link = `${window.location.origin}/mesa/${campaign.id}?convite=${encodeURIComponent(code)}`
+      await navigator.clipboard.writeText(link)
       setInviteState('copied')
     } catch {
       setInviteState('error')

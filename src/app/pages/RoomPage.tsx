@@ -6,13 +6,19 @@ import { actorSchema, ordemParanormalSystem, tokenSchema } from '@/core'
 import { useAuthStore } from '@/app/authStore'
 import { demoScene } from '@/app/demo'
 import { destroyRoomSession, initRoomSession, useBoardStore } from '@/app/store'
-import { deleteCampaign, getCampaign, joinCampaignByCode } from '@/data/campaigns'
+import {
+  deleteCampaign,
+  getCampaign,
+  getInviteCode,
+  joinCampaignByCode,
+} from '@/data/campaigns'
 import { isSupabaseConfigured } from '@/data/supabase'
 import { loadLocalAsset, saveLocalAsset, deleteLocalAsset, sceneMapKey } from '@/data/localAssets'
 import { LoungeView } from '@/app/pages/LoungeView'
 import { BoardCanvas } from '@/ui/board/BoardCanvas'
 import { BoardToolbar } from '@/ui/board/BoardToolbar'
 import { PresenceBar } from '@/ui/board/PresenceBar'
+import { SyncWarning } from '@/ui/board/SyncWarning'
 import { ChatPanel } from '@/ui/chat/ChatPanel'
 import { GmScreen } from '@/ui/gm/GmScreen'
 import { OpSheetWindow } from '@/ui/sheets/ordem-paranormal/OpSheet'
@@ -35,26 +41,52 @@ type Access =
 
 /** Tela de "sem acesso": pede o código de convite da mesa. */
 function AccessGate({ roomId, onJoined }: { roomId: string; onJoined(): void }) {
-  const [code, setCode] = useState('')
+  const [params] = useSearchParams()
+  const codeFromLink = params.get('convite') ?? ''
+  const [code, setCode] = useState(codeFromLink)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const autoTried = useRef(false)
+
+  const join = useCallback(
+    async (rawCode: string) => {
+      setBusy(true)
+      setError(null)
+      try {
+        const joinedId = await joinCampaignByCode(rawCode)
+        if (joinedId !== roomId) {
+          setError('Esse código é de outra mesa.')
+          return
+        }
+        onJoined()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Código inválido.')
+      } finally {
+        setBusy(false)
+      }
+    },
+    [roomId, onJoined],
+  )
+
+  // Link de convite (?convite=...): entra sozinho, sem pedir nada ao jogador.
+  useEffect(() => {
+    if (codeFromLink && !autoTried.current) {
+      autoTried.current = true
+      void join(codeFromLink)
+    }
+  }, [codeFromLink, join])
 
   async function handleJoin(e: FormEvent) {
     e.preventDefault()
-    setBusy(true)
-    setError(null)
-    try {
-      const joinedId = await joinCampaignByCode(code)
-      if (joinedId !== roomId) {
-        setError('Esse código é de outra mesa.')
-        return
-      }
-      onJoined()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Código inválido.')
-    } finally {
-      setBusy(false)
-    }
+    await join(code)
+  }
+
+  if (codeFromLink && busy) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-zinc-950">
+        <p className="text-sm text-zinc-500">Entrando na mesa…</p>
+      </main>
+    )
   }
 
   return (
@@ -261,9 +293,28 @@ function RoomView({
   const setTokenImage = useBoardStore((s) => s.setTokenImage)
   const setMapUri = useBoardStore((s) => s.setMapUri)
   const [zoom, setZoom] = useState<number | null>(null)
-  const [linkCopied, setLinkCopied] = useState(false)
+  const [inviteState, setInviteState] = useState<'idle' | 'loading' | 'copied' | 'error'>('idle')
   const [gmScreenOpen, setGmScreenOpen] = useState(false)
   const [endModalOpen, setEndModalOpen] = useState(false)
+
+  // Mestre copia um link que JÁ carrega o convite (?convite=...): o jogador
+  // clica e entra direto, sem precisar receber um código à parte.
+  const copyInviteLink = useCallback(async () => {
+    setInviteState('loading')
+    try {
+      const base = `${window.location.origin}/mesa/${roomId}`
+      const link =
+        isGm && isSupabaseConfigured
+          ? `${base}?convite=${encodeURIComponent(await getInviteCode(roomId))}`
+          : base
+      await navigator.clipboard.writeText(link)
+      setInviteState('copied')
+    } catch {
+      setInviteState('error')
+    } finally {
+      setTimeout(() => setInviteState('idle'), 2000)
+    }
+  }, [roomId, isGm])
 
   const tokenImageInputRef = useRef<HTMLInputElement>(null)
   const pendingTokenIdRef = useRef<string | null>(null)
@@ -378,6 +429,8 @@ function RoomView({
           onEvent={handleBoardEvent}
         />
 
+        <SyncWarning />
+
         <PresenceBar peers={peers} onRename={setDisplayName} />
 
         <BoardToolbar
@@ -424,16 +477,24 @@ function RoomView({
             <span>{CONNECTION_LABEL[connection]}</span>
             <button
               type="button"
-              onClick={() => {
-                void navigator.clipboard.writeText(window.location.href).then(() => {
-                  setLinkCopied(true)
-                  setTimeout(() => setLinkCopied(false), 2000)
-                })
-              }}
-              className="pointer-events-auto rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-300 transition-colors hover:bg-zinc-700"
-              title="Copiar o link da mesa (jogadores novos também vão precisar do código de convite)"
+              onClick={() => void copyInviteLink()}
+              disabled={inviteState === 'loading'}
+              className="pointer-events-auto rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-300 transition-colors hover:bg-zinc-700 disabled:opacity-50"
+              title={
+                isGm
+                  ? 'Copia um link que já entra na mesa — basta mandar para os jogadores'
+                  : 'Copiar o link desta mesa'
+              }
             >
-              {linkCopied ? 'Copiado!' : 'Copiar link'}
+              {inviteState === 'copied'
+                ? 'Copiado!'
+                : inviteState === 'error'
+                  ? 'Erro ao gerar'
+                  : inviteState === 'loading'
+                    ? '…'
+                    : isGm
+                      ? '🎟️ Copiar convite'
+                      : 'Copiar link'}
             </button>
           </p>
           {isGm && (
